@@ -15,7 +15,10 @@ class ALSTrainer(object):
         self.rateFilePath = rateFilePath
         self.modelFilePath = modelFilePath
 
-        self.spark = SparkSession.builder.appName("YelpPreprocessor").getOrCreate()
+        print('rateFilePath:' + rateFilePath)
+        print('modelFilePath' + modelFilePath)
+
+        self.spark = SparkSession.builder.appName("ALSModelTraining").getOrCreate()
         self.spark.sparkContext.setLogLevel("WARN")
 
     def train(self):
@@ -23,38 +26,55 @@ class ALSTrainer(object):
                                  StructField("businessIndex", IntegerType(), True),
                                  StructField("city", StringType(), True),
                                  StructField("rate", FloatType(), True)])
-        rateDF = self.spark.read.csv(path=self.rateFilePath, schema=rateSchema).cache()
-        (training, test) = rateDF.randomSplit([0.8, 0.2])
+        rateDF = self.spark.read.csv(path=self.rateFilePath, schema=rateSchema).select(
+            'userIndex', 'businessIndex', 'rate')
+        (training, test) = rateDF.randomSplit([0.8, 0.2], seed=0)
+        training.cache()
+        print('training count:{}'.format(training.count()))
+        test.cache()
+        print('test count:{}'.format(test.count()))
 
-        als = ALS(maxIter=10, userCol="userIndex", itemCol="businessIndex", ratingCol="rate",
-                  coldStartStrategy="drop")
-        paramGrid = ParamGridBuilder() \
-            .addGrid(als.rank, [20, 50, 100]) \
-            .addGrid(als.regParam, [0.1, 0.02]) \
-            .build()
-        crossval = CrossValidator(estimator=als,
-                                  estimatorParamMaps=paramGrid,
-                                  evaluator=RegressionEvaluator(metricName="rmse", labelCol="rate",
-                                                                predictionCol="prediction"),
-                                  numFolds=3,
-                                  parallelism=2)
-        bestALSModel = crossval.fit(training)
+        bestALSModel = self.trainALSModelWithException(training)
         print('regParam:{}'.format(bestALSModel.bestModel._java_obj.parent().getRegParam()))
         print('rank:{}'.format(bestALSModel.bestModel.rank))
 
         #print('avgMetrics:' + str(bestALSModel.avgMetrics))
 
-        predictions = bestALSModel.transform(test)
         evaluator = RegressionEvaluator(metricName="rmse", labelCol="rate",
                                         predictionCol="prediction")
+
+        predictions = bestALSModel.transform(training)
+        rmse = evaluator.evaluate(predictions)
+        print("Root-mean-square for training error = " + str(rmse))
+
+        predictions = bestALSModel.transform(test)
         rmse = evaluator.evaluate(predictions)
         print("Root-mean-square for test error = " + str(rmse))
 
-        bestALSModel.save(self.modelFilePath)
+        print('save model modelFilePath:' + self.modelFilePath)
+        bestALSModel.write().overwrite().save(self.modelFilePath)
 
         self.spark.stop()
 
+    def trainALSModelWithException(self, training):
+        try:
+            return self.trainALSMode('drop', training)
+        except:
+            print('fit exception happen. use non drop')
+            return self.trainALSMode('nan', training)
 
+    def trainALSMode(self, strategy, training):
+        als = ALS(maxIter=10, userCol="userIndex", itemCol="businessIndex", ratingCol="rate",
+                  coldStartStrategy=strategy)
+        paramGrid = ParamGridBuilder() \
+            .addGrid(als.rank, [20, 50, 100]) \
+            .addGrid(als.regParam, [0.1, 0.02]) \
+            .build()
+        crossval = CrossValidator(estimator=als, estimatorParamMaps=paramGrid,
+                                  evaluator=RegressionEvaluator(metricName="rmse", labelCol="rate",
+                                                                predictionCol="prediction"), numFolds=3,
+                                  parallelism=4)
+        return crossval.fit(training)
 
 
 def main():
