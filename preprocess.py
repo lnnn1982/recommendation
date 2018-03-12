@@ -37,6 +37,8 @@ class FileConverter(object):
 
         self.__getCityRateFile()
 
+        self.spark.stop()
+
 
     def __genAllDataCSVFile(self):
         print('__genAllDataCSVFile')
