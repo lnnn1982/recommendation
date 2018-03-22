@@ -7,16 +7,11 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import *
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.recommendation import ALS
-from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
-
+import time
 
 class ALSTrainer(object):
-    def __init__(self, rateFilePath, modelFilePath):
+    def __init__(self, rateFilePath):
         self.rateFilePath = rateFilePath
-        self.modelFilePath = modelFilePath
-
-        print('rateFilePath:' + rateFilePath)
-        print('modelFilePath' + modelFilePath)
 
         self.spark = SparkSession.builder.appName("ALSModelTraining").getOrCreate()
         self.spark.sparkContext.setLogLevel("WARN")
@@ -28,33 +23,68 @@ class ALSTrainer(object):
                                  StructField("rate", FloatType(), True)])
         rateDF = self.spark.read.csv(path=self.rateFilePath, schema=rateSchema).select(
             'userIndex', 'businessIndex', 'rate')
-        (training, test) = rateDF.randomSplit([0.8, 0.2], seed=0)
-        training.cache()
+        rateDF.cache()
+
+        (training, test) = rateDF.randomSplit([0.8, 0.2])
+        print('train for file:' + self.rateFilePath)
         print('training count:{}'.format(training.count()))
-        test.cache()
         print('test count:{}'.format(test.count()))
 
-        bestALSModel = self.trainALSModelWithException(training)
-        print('regParam:{}'.format(bestALSModel.bestModel._java_obj.parent().getRegParam()))
-        print('rank:{}'.format(bestALSModel.bestModel.rank))
+        beforeTime = time.time()
+        alsModel = self.trainALSModelWithException(training)
+        trainTime = time.time() - beforeTime
 
-        #print('avgMetrics:' + str(bestALSModel.avgMetrics))
+        rmseList = []
+        #trainTimes = []
+        testTimes = []
+        for i in range(0,20):
+            #rmse, trainTime, testTime = self.oneTimeTrain(rateDF)
+            rmse, testTime = self.oneTimeTest(alsModel, test)
+            print("one time Root-mean-square for test error = " + str(rmse))
+            #print("one time train time = " + str(trainTime))
+            print("one time test time = " + str(testTime))
+
+            rmseList.append(rmse)
+            testTimes.append(testTime)
+
+        meanRmse = self.getMeanValue(rmseList)
+        meanTestTime = self.getMeanValue(testTimes)
+
+        print('mean rmse:' + str(meanRmse) + ', mean test time:' + str(meanTestTime)
+              + ', mean train time:' + trainTime)
+
+        self.spark.stop()
+
+    def getMeanValue(self, valueList):
+        return float(sum(valueList)) / len(valueList)
+
+    def oneTimeTest(self, alsModel, test):
+        beforeTime = time.time()
+        predictions = alsModel.transform(test)
+        testTime = time.time() - beforeTime
 
         evaluator = RegressionEvaluator(metricName="rmse", labelCol="rate",
                                         predictionCol="prediction")
-
-        predictions = bestALSModel.transform(training)
         rmse = evaluator.evaluate(predictions)
-        print("Root-mean-square for training error = " + str(rmse))
+        return rmse, testTime
 
-        predictions = bestALSModel.transform(test)
+    def oneTimeTrain(self, rateDF):
+        (training, test) = rateDF.randomSplit([0.8, 0.2])
+        print('training count:{}'.format(training.count()))
+        print('test count:{}'.format(test.count()))
+
+        beforeTime = time.time()
+        alsModel = self.trainALSModelWithException(training)
+        trainTime = time.time() - beforeTime
+
+        beforeTime = time.time()
+        predictions = alsModel.transform(test)
+        testTime = time.time() - beforeTime
+
+        evaluator = RegressionEvaluator(metricName="rmse", labelCol="rate",
+                                        predictionCol="prediction")
         rmse = evaluator.evaluate(predictions)
-        print("Root-mean-square for test error = " + str(rmse))
-
-        print('save model modelFilePath:' + self.modelFilePath)
-        bestALSModel.write().overwrite().save(self.modelFilePath)
-
-        self.spark.stop()
+        return rmse, trainTime, testTime
 
     def trainALSModelWithException(self, training):
         try:
@@ -64,26 +94,16 @@ class ALSTrainer(object):
             return self.trainALSMode('nan', training)
 
     def trainALSMode(self, strategy, training):
-        als = ALS(maxIter=10, userCol="userIndex", itemCol="businessIndex", ratingCol="rate",
-                  coldStartStrategy=strategy)
-        paramGrid = ParamGridBuilder() \
-            .addGrid(als.rank, [20, 50, 100]) \
-            .addGrid(als.regParam, [0.1, 0.02]) \
-            .build()
-        crossval = CrossValidator(estimator=als, estimatorParamMaps=paramGrid,
-                                  evaluator=RegressionEvaluator(metricName="rmse", labelCol="rate",
-                                                                predictionCol="prediction"), numFolds=3,
-                                  parallelism=4)
-        return crossval.fit(training)
-
+        als = ALS(maxIter=20, userCol="userIndex", itemCol="businessIndex", ratingCol="rate",
+                  coldStartStrategy=strategy, rank=200, regParam=0.1)
+        return als.fit(training)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('csvFilePath')
-    parser.add_argument('modelFilePath')
 
     args = parser.parse_args()
-    trainer = ALSTrainer(args.csvFilePath, args.modelFilePath)
+    trainer = ALSTrainer(args.csvFilePath)
     trainer.train()
 
 
