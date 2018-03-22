@@ -25,33 +25,36 @@ class ALSTrainer(object):
             'userIndex', 'businessIndex', 'rate')
         rateDF.cache()
 
-        (training, test) = rateDF.randomSplit([0.8, 0.2])
-        print('train for file:' + self.rateFilePath)
-        print('training count:{}'.format(training.count()))
-        print('test count:{}'.format(test.count()))
+        # (training, test) = rateDF.randomSplit([0.8, 0.2])
+        # print('training count:{}'.format(training.count()))
+        # print('test count:{}'.format(test.count()))
+        # beforeTime = time.time()
+        # alsModel = self.trainALSModelWithException(training)
+        # trainTime = time.time() - beforeTime
 
-        beforeTime = time.time()
-        alsModel = self.trainALSModelWithException(training)
-        trainTime = time.time() - beforeTime
+        print('train for file:' + self.rateFilePath)
 
         rmseList = []
-        #trainTimes = []
+        trainTimes = []
         testTimes = []
-        for i in range(0,20):
-            #rmse, trainTime, testTime = self.oneTimeTrain(rateDF)
-            rmse, testTime = self.oneTimeTest(alsModel, test)
+        for i in range(0, 3):
+            # rmse, testTime = self.oneTimeTest(alsModel, test)
+
+            rmse, trainTime, testTime = self.oneTimeTrain(rateDF)
             print("one time Root-mean-square for test error = " + str(rmse))
-            #print("one time train time = " + str(trainTime))
+            print("one time train time = " + str(trainTime))
             print("one time test time = " + str(testTime))
 
             rmseList.append(rmse)
+            trainTimes.append(trainTime)
             testTimes.append(testTime)
 
         meanRmse = self.getMeanValue(rmseList)
         meanTestTime = self.getMeanValue(testTimes)
+        meanTrainTime = self.getMeanValue(trainTimes)
 
         print('mean rmse:' + str(meanRmse) + ', mean test time:' + str(meanTestTime)
-              + ', mean train time:' + trainTime)
+              + ', mean train time:' + str(meanTrainTime))
 
         self.spark.stop()
 
