@@ -57,14 +57,13 @@ def calRateFromItem2(rateList):
         #print("calRateFromItem2 error. rateList:" + str(rateList))
         return 0
 
-def cfItemTrain(rateFilePath, neighborNum, type):
+def cfItemTrain(rateFilePath, neighborNum):
     spark = SparkSession.builder.appName("CFItemModel").getOrCreate()
     sc = spark.sparkContext
     sc.setLogLevel("WARN")
 
     print('filePath:' + rateFilePath)
     print('neighbour number:' + str(neighborNum))
-    print('type:' + type)
 
     rateSchema = StructType([StructField("userID", IntegerType(), True),
                              StructField("itemID", IntegerType(), True),
@@ -74,13 +73,8 @@ def cfItemTrain(rateFilePath, neighborNum, type):
         'userID', 'itemID', 'rating')
     (training, test) = rateDF.randomSplit([0.8, 0.2], seed=0)
 
-    rddDf = rateDF.rdd
-    if (type == 'test'):
-        rddDf = test.rdd
-    elif (type == 'train'):
-        rddDf = training.rdd
-
-    print("count size:" + str(rddDf.count()))
+    rddDf = training.rdd
+    print("training count size:" + str(rddDf.count()))
 
     itemUserRateRdd = rddDf.map(lambda x: (x.itemID, (x.userID, x.rating)))
     #print("itemUserRateRdd:" + str(itemUserRateRdd.collect()))
@@ -135,16 +129,28 @@ def cfItemTrain(rateFilePath, neighborNum, type):
     #print('predictRateRdd' + str(predictRateRdd.collect()))
 
     rmse = math.sqrt(predictRateRdd.map(lambda r: (r[1][0] - r[1][1])**2).mean())
-    print("rmse:" + str(rmse))
+    print("training data rmse:" + str(rmse))
+
+    rddDfTest = test.rdd
+    print("test count size:" + str(rddDfTest.count()))
+    usrUserRageRddTest = rddDfTest.map(lambda x: ((x.userID, x.itemID), x.rating))
+    predictRateRddTest = usrUserRageRddTest.join(userItemPredictRateRdd)
+    rmse = math.sqrt(predictRateRddTest.map(lambda r: (r[1][0] - r[1][1])**2).mean())
+    print("test data rmse:" + str(rmse))
+
+
+
+
+
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('csvFilePath')
     parser.add_argument('neighborNum')
-    parser.add_argument('type')
 
     args = parser.parse_args()
-    cfItemTrain(args.csvFilePath, (int)(args.neighborNum), args.type)
+    cfItemTrain(args.csvFilePath, (int)(args.neighborNum))
 
 if __name__ == '__main__':
     main()
