@@ -38,9 +38,19 @@ def calculateSimilarity(x):
 
     return cosine_similarity(simRows1, simRows2)[0][0]
 
+#[(2, 0.96536339302826624, 2.0), (1, 0.99860319520601903, 14.0), (3, 0.99970980846748225, 6.0)]
+def calRateFromItem2(rateList):
+    simRateSum = 0
+    simSum = 0
+    for oneRate in rateList:
+        simRateSum = simRateSum + (oneRate[1]*oneRate[2])
+        simSum = simSum + oneRate[1]
 
-
-
+    if simSum != 0:
+        return simRateSum / simSum
+    else:
+        print("calRateFromItem2 error")
+        return 0
 
 def cfItemTrain(rateFilePath):
     spark = SparkSession.builder.appName("CFItemModel").getOrCreate()
@@ -74,15 +84,22 @@ def cfItemTrain(rateFilePath):
                     ).mapValues(list).map(lambda x:(x[0], sorted(x[1], key=lambda d:d[0], reverse=True)[0:10]))
 
     #split item1,use item2 as key
+    #item2 (item1 similarity)
+    #(4, (1, 0.99860319520601903)), (3, (1, 0.99958619974434737))
     item2Item1RateRdd = itemSimilarityRdd.flatMapValues(lambda x:x).map(lambda x : (x[1][0], (x[0],x[1][1])))
 
     #item1 user item2 similarity rate2
+    #((1, 2), (2, 0.95022954097349777, 2.0))
     item1UserItem2InfoRdd = item2Item1RateRdd.join(itemUserRateRdd).map(lambda x: ((x[1][0][0],x[1][1][0]),
                                                                     (x[0],x[1][0][1],x[1][1][1])))
 
+    #item1 user rateInfo
+    #((4, 2), [(2, 0.96536339302826624, 2.0), (1, 0.99860319520601903, 14.0), (3, 0.99970980846748225, 6.0)])
     item1UserGroupByitem2 = item1UserItem2InfoRdd.groupByKey().mapValues(list)
 
-
+    #user item rate
+    #(2, 4, 7.3926527181335917)
+    userItemPredictRateRdd = item1UserGroupByitem2.map(lambda x:(x[0][1], x[0][0], calRateFromItem2(x[1])))
 
 
 
