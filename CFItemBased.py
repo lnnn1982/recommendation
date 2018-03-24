@@ -71,7 +71,7 @@ def cfItemTrain(rateFilePath, neighborNum):
                              StructField("rating", FloatType(), True)])
     rateDF = spark.read.csv(path=rateFilePath, schema=rateSchema).select(
         'userID', 'itemID', 'rating')
-    (training, test) = rateDF.randomSplit([0.8, 0.2], seed=0)
+    (training, test) = rateDF.randomSplit([0.8, 0.2])
 
     rddDf = training.rdd
     print("training count size:" + str(rddDf.count()))
