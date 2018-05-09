@@ -1,2 +1,2 @@
 # recommendation
-**An ALS training model using Spark ML library based on Yelp data**
+**Implementations of Spark recommendation models including ALS, item-based CF and frequent patterns based on Yelp data**
